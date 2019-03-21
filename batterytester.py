@@ -7,6 +7,7 @@ Allows to test capacity of Li-Ion batteries in //
 Based on
 - AdafruitCircuit Playground Express running CPy 4.0.0beta
 - INA3221 for voltage/current measurement
+   driver: https://github.com/barbudor/Adafruit_CircuitPython_INA219
 - 4 relays board (Chinese, such as SainSmart)
 """
 
@@ -16,7 +17,7 @@ import storage
 from micropython import const
 import digitalio
 import board
-from adafruit_circuitplayground.express import cpx
+import neopixel
 
 from barbudor_ina3221_lite import INA3221
 
@@ -33,8 +34,8 @@ class Tester:
     _STATE_ENDED              = const(9)
 
     # CPX pin labels for relays
-    _RELAY_ON                 = const(False)
-    _RELAY_OFF                = const(True)
+    _RELAY_ON                 = const(0)
+    _RELAY_OFF                = const(1)
 
     # CPX neopixel index
     _PIX_WAITING = (0, 0, 85)
@@ -45,26 +46,26 @@ class Tester:
     _PIX_OFF = (0, 0, 0)
 
     # INA3221 resistor value
-    _SHUNT_VALUE              = const(0.1)
+    _SHUNT_VALUE              = 0.1
 
     _FILE_COUNTER             = "/tester.count"
     _FILE_LOG                 = "/battery%03d.csv"
     _LOG_HEADER               = "File: %s\nTime; Voltage (V); Current (A)\n"
     _LOG_FORMAT               = "%9.2f; %6.3f; %6.3f\n"
 
-    _SAMPLE_PERIOD_DEFAULT    = const(10.0)
-    _SAMPLE_PERIOD_FAST       = const(1.0)
-    _SAMPLE_PERIOD_ENDING     = const(0.5)
+    _SAMPLE_PERIOD_DEFAULT    = 10.0
+    _SAMPLE_PERIOD_FAST       = 1.0
+    _SAMPLE_PERIOD_ENDING     = 0.5
     _ENDING_DURATION          = const(60)
 
-    _END_VOLTAGE              = const(3.0)
+    _END_VOLTAGE              = 3.0
     # pylint: enable=bad-whitespace
 
     def _setpix(self, color):
-        cpx.pixels[self.pixel] = color
+        cpx_pixels[self.pixel] = color
 
     def _getpix(self):
-        return cpx.pixels[self.pixel]
+        return cpx_pixels[self.pixel]
 
     def _read_file_counter(self):
         counter = 0
@@ -206,15 +207,16 @@ class Tester:
 
 ################################################################################
 
-cpx.pixels.brightness = 0.1
+cpx_pixels = NeoPixel(board.NEOPIXEL,10)
+cpx_pixels.brightness = 0.1
 
 # create measure chip
 i2c_bus = board.I2C()
 ina = INA3221(i2c_bus)
 
 # create testers
-testers = (Tester(1, ina, board.A1, 6), Tester(2, ina, board.A2, 7), Tester(3, ina, board.A3, 8))
-#testers = [Tester(1, ina, board.A1, 6)]
+#testers = (Tester(ina, 1, board.A1, 6), Tester(ina, 2, board.A2, 7), Tester(ina, 3, board.A3, 8))
+testers = [Tester(ina, 1, board.A1, 6)]
 
 def RunTest():
     # check if FS is writable
@@ -226,7 +228,7 @@ def RunTest():
         try:
             storage.remount("/", False)
         except:
-            cpx.pixels[0] = (255, 0, 0,)
+            cpx_pixels[0] = (255, 0, 0,)
             while True:
                 pass
 
