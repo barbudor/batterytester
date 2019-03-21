@@ -7,7 +7,7 @@ Allows to test capacity of Li-Ion batteries in //
 Based on
 - AdafruitCircuit Playground Express running CPy 4.0.0beta
 - INA3221 for voltage/current measurement
-   driver: https://github.com/barbudor/Adafruit_CircuitPython_INA219
+   driver: https://github.com/barbudor/CircuitPython_INA3221
 - 4 relays board (Chinese, such as SainSmart)
 """
 
