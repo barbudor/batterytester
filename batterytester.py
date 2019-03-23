@@ -24,6 +24,7 @@ import board
 # pylint: disable=bad-whitespace
 # states
 _STATE_WAITING              = 0
+_STATE_STARTING              = 1
 _STATE_RUNNING              = 2
 _STATE_RUNNING_FAST         = 4
 _STATE_RUNNING_FAST2        = 5
@@ -49,7 +50,8 @@ _SHUNT_VALUE                = 0.1
 _FILE_COUNTER               = "/testcount.txt"
 _FILE_LOG                   = "/battery%03d.csv"
 _LOG_HEADER                 = "File: %s\nTime;Voltage (V);Current (A);C (Ah)\n"
-_LOG_FORMAT                 = "%7.1f;%6.3f;%6.3f;%6.3f\n"
+#_LOG_FORMAT                 = "%7.1f;%6.3f;%6.3f;%6.3f\n"
+_LOG_FORMAT                 = "%f;%f;%f;%f\n"
 
 _SAMPLE_PERIOD_DEFAULT      = 10.0
 _SAMPLE_PERIOD_FAST         = 2.0
@@ -60,6 +62,8 @@ _ENDING_DURATION            = 120
 _VOLTAGE_FAST               = 3.5
 _VOLTAGE_FAST2              = 3.25
 _VOLTAGE_END                = 2.9
+
+_CYCLE_COUNT                = 4
 # pylint: enable=bad-whitespace
 
 
@@ -131,11 +135,6 @@ class Tester:
         self.sensor = sensor
         self.channel = channel
         self.pixel = neopixel
-        self.sample_count = 0
-        self.sample_period = 0
-        self.ending = 0
-        self.previous_voltage = 4.2
-
         self.state = _STATE_WAITING
         self._setpix(_PIX_WAITING)
 
@@ -149,36 +148,41 @@ class Tester:
 
     def start(self):
         # initialise state machine
-        self.sample_period = _SAMPLE_PERIOD_DEFAULT
-        self.ending = _ENDING_DURATION
-        self.state = _STATE_RUNNING
-        pixel = _PIX_RUNNING
-        self._setpix(tuple(3*x for x in pixel))
+        self.sample_count = 0
+        self.sample_period = 0
+        self.cycle_count = _CYCLE_COUNT
+        self.state = _STATE_STARTING
+        self.sum_c = 0.0
         # start V & I measurement
         self.sensor.enable_channel(self.channel)
         # create log file
         self._create_log()
         print("%9.2f:[%d]: writing to '%s'" % (0.0, self.channel, self.logfilename))
-        # initial sample performed with relay off (battery not loaded)
-        self.start_time = time.monotonic()
-        (voltage, current) = self._read_v_and_i()
-        print("%9.2f:[%d]: sample %5.3fV, %5.3fA" % (0.0, self.channel, voltage, current))
-        # initialise values
-        self.sum_c = 0.0
-        self.previous_voltage = voltage
-        self.previous_current = current
-        self.last_time = self.start_time - self.sample_period + 1.0
-        # write 1st log entry
-        self._write_log(0, voltage, current, self.sum_c)
-        # switch on the load relay
-        self.relay.value = _RELAY_ON
-        # restore pixel
-        self._setpix(pixel)
+
 
     def run(self):
-        if self.state < _STATE_ENDED:
+        if self.state == _STATE_STARTING:
+            self.state = _STATE_RUNNING
+            pixel = _PIX_RUNNING
+            self.sample_period = _SAMPLE_PERIOD_DEFAULT
+            self._setpix(tuple(3*x for x in pixel))
+            # initial sample performed with relay off (battery not loaded)
+            self.start_time = time.monotonic()
+            (voltage, current) = self._read_v_and_i()
+            print("%9.2f:[%d]: sample %5.3fV, %5.3fA" % (0.0, self.channel, voltage, current))
+            # write 1st log entry
+            self._write_log(0, voltage, current, self.sum_c)
+            # initialise values
+            self.previous_voltage = voltage
+            self.previous_current = current
+            self.last_time = self.start_time - self.sample_period + 1.0
+            # switch on the load relay
+            self.relay.value = _RELAY_ON
+            # next state is running
+        elif self.state < _STATE_ENDED:
             now = time.monotonic()
-            if now - self.last_time >= self.sample_period:
+            delta_t = now - self.last_time
+            if delta_t >= self.sample_period:
                 # save current pixel then increase light
                 pixel = self._getpix()
                 self._setpix(tuple(3*x for x in pixel))
@@ -186,7 +190,6 @@ class Tester:
                 print("%9.2f:[%d]: sample %5.3fV, %5.3fA" % \
                     (now-self.start_time, self.channel, voltage, current))
                 delta_i = self.previous_current - current
-                delta_t = now - self.last_time
                 delta_c = delta_t * (self.previous_current + current) / (2.0 * 3600.0)
                 self.last_time += self.sample_period
 
@@ -196,6 +199,7 @@ class Tester:
                         self.state = _STATE_RUNNING_FAST
                         pixel = _PIX_RUNNING_FAST
                         self.sample_period = _SAMPLE_PERIOD_FAST
+                # endif self.state < _STATE_RUNNING_FAST:
 
                 if self.state < _STATE_RUNNING_FAST2:
                     if voltage < _VOLTAGE_FAST2:
@@ -203,6 +207,7 @@ class Tester:
                         self.state = _STATE_RUNNING_FAST2
                         pixel = _PIX_RUNNING_FAST2
                         self.sample_period = _SAMPLE_PERIOD_FAST2
+                # endif self.state < _STATE_RUNNING_FAST2:
 
                 if self.state < _STATE_ENDING:
                     self.sum_c += delta_c
@@ -210,25 +215,37 @@ class Tester:
                         print("%9.2f:[%d]: ->ending" % (now-self.start_time, self.channel))
                         self.relay.value = _RELAY_OFF
                         self.state = _STATE_ENDING
+                        self.ending = _ENDING_DURATION
                         pixel = _PIX_ENDING
                         self.sample_period = _SAMPLE_PERIOD_ENDING
+                # endif self.state < _STATE_ENDING:
 
                 if self.state == _STATE_ENDING:
                     self.ending -= 1
                     if self.ending == 0:
-                        print("%9.2f:[%d]: ended" % (now-self.start_time, self.channel))
-                        self.state = _STATE_ENDED
-                        pixel = _PIX_ENDED
+                        self.cycle_count -= 1
+                        if self.cycle_count <= 0:
+                            print("%9.2f:[%d]: ended" % (now-self.start_time, self.channel))
+                            self.state = _STATE_ENDED
+                            pixel = _PIX_ENDED
+                            self.sensor.enable_channel(self.channel, False)
+                        else:
+                            self.relay.value = _RELAY_ON
+                            self.state = _STATE_RUNNING_FAST
+                            pixel = _PIX_RUNNING_FAST
+                            self.sample_period = _SAMPLE_PERIOD_FAST
+                # endif self.state == _STATE_ENDING:
 
+                # write to file
                 self._write_log(now - self.start_time, voltage, current, self.sum_c)
-
+                # keep for next
                 self.previous_voltage = voltage
                 self.previous_current = current
                 # restore pixel or update to new
                 self._setpix(pixel)
-            #if now >= self.next_time:
-        #if self.state < _STATE_ENDED:
-    #def run()
+            # endif now >= self.next_time:
+        # endif self.state < _STATE_ENDED:
+    #enddef run()
 
 
 ################################################################################
