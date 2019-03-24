@@ -22,48 +22,52 @@ import board
 
 
 # pylint: disable=bad-whitespace
-# states
+# states, sample period, neopixels colors
+# WAITING - From Testesr instance creation until start
 _STATE_WAITING              = 0
-_STATE_STARTING              = 1
+_PIX_WAITING                = (  0,   0, 80)
+# STARTING - Start with 1st sample with relay still off and move to RUN
+_STATE_STARTING             = 1
+# RUNNING - Mesure every _SAMPLE_PERIOD_DEFAULT
 _STATE_RUNNING              = 2
+_SAMPLE_PERIOD_DEFAULT      = 10.0
+_PIX_RUNNING                = (  0,  80,  0)
+# RUNNING_FAST - Accelerate mesure rate as soon as voltage drops below _VOLTAGE_FAST
 _STATE_RUNNING_FAST         = 4
+_VOLTAGE_FAST               = 3.5
+_SAMPLE_PERIOD_FAST         = 2.0
+_PIX_RUNNING_FAST           = (  8,  80,  0)
+# RUNNING_FAST2 - Accelerate further when voltage dropx below _VOLTAGE_FAST2
 _STATE_RUNNING_FAST2        = 5
+_VOLTAGE_FAST2              = 3.25
+_SAMPLE_PERIOD_FAST2        = 0.5
+_PIX_RUNNING_FAST2          = ( 25,  80,  0)
+# ENDING - As voltage drops below _VOLTAGE_END, relay is off and we keep measuring for _ENDING_DURATION_SAMPLES
 _STATE_ENDING               = 8
+_VOLTAGE_END                = 2.9
+_SAMPLE_PERIOD_ENDING       = 0.5
+_ENDING_DURATION            = 120
+_PIX_ENDING                 = ( 80,  80,  0)
+# END of all measurements if done _CYCLE_COUNT complete cycles
+_CYCLE_COUNT                = 4
 _STATE_ENDED                = 9
+_PIX_ENDED                  = (255,   0,  0)
+
+_PIX_OFF                    = (  0,   0,  0)
 
 # pin labels for relays
 _RELAY_ON                   = 0
 _RELAY_OFF                  = 1
 
-# neopixel values for representing states
-_PIX_WAITING                = (  0,   0, 80)
-_PIX_RUNNING                = (  0,  80,  0)
-_PIX_RUNNING_FAST           = (  8,  80,  0)
-_PIX_RUNNING_FAST2          = ( 25,  80,  0)
-_PIX_ENDING                 = ( 80,  80,  0)
-_PIX_ENDED                  = (255,   0,  0)
-_PIX_OFF                    = (  0,   0,  0)
-
 # INA3221 resistor value
 _SHUNT_VALUE                = 0.1
 
+# file names and log format
 _FILE_COUNTER               = "/testcount.txt"
 _FILE_LOG                   = "/battery%03d.csv"
 _LOG_HEADER                 = "File: %s\nTime;Voltage (V);Current (A);C (Ah)\n"
 #_LOG_FORMAT                 = "%7.1f;%6.3f;%6.3f;%6.3f\n"
 _LOG_FORMAT                 = "%f;%f;%f;%f\n"
-
-_SAMPLE_PERIOD_DEFAULT      = 10.0
-_SAMPLE_PERIOD_FAST         = 2.0
-_SAMPLE_PERIOD_FAST2        = 0.5
-_SAMPLE_PERIOD_ENDING       = 0.5
-_ENDING_DURATION            = 120
-
-_VOLTAGE_FAST               = 3.5
-_VOLTAGE_FAST2              = 3.25
-_VOLTAGE_END                = 2.9
-
-_CYCLE_COUNT                = 4
 # pylint: enable=bad-whitespace
 
 
@@ -114,9 +118,7 @@ class Tester:
     #    return (voltage, current)
 
     def _read_v_and_i(self):
-        voltage = self.sensor.bus_voltage(self.channel)
-        current = self.sensor.current(self.channel)
-        return (voltage, current)
+        return (self.sensor.bus_voltage(self.channel), self.sensor.current(self.channel))
 
     def _create_log(self):
         filecount = self._read_file_counter()
@@ -158,7 +160,6 @@ class Tester:
         # create log file
         self._create_log()
         print("%9.2f:[%d]: writing to '%s'" % (0.0, self.channel, self.logfilename))
-
 
     def run(self):
         if self.state == _STATE_STARTING:
@@ -212,7 +213,8 @@ class Tester:
                 if self.state < _STATE_ENDING:
                     self.sum_c += delta_c
                     if voltage <= _VOLTAGE_END:
-                        print("%9.2f:[%d]: ->ending" % (now-self.start_time, self.channel))
+                        print("%9.2f:[%d]: ->ending cycle %d" % \
+                            (now-self.start_time, self.channel, _CYCLE_COUNT-self.cycle_count+1))
                         self.relay.value = _RELAY_OFF
                         self.state = _STATE_ENDING
                         self.ending = _ENDING_DURATION
@@ -230,6 +232,8 @@ class Tester:
                             pixel = _PIX_ENDED
                             self.sensor.enable_channel(self.channel, False)
                         else:
+                            print("%9.2f:[%d]: cycle %d" % \
+                                   (now-self.start_time, self.channel, _CYCLE_COUNT-self.cycle_count))
                             self.relay.value = _RELAY_ON
                             self.state = _STATE_RUNNING_FAST
                             pixel = _PIX_RUNNING_FAST
