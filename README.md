@@ -7,6 +7,20 @@ sensor to measure batteries voltage and current drawn during a discharge cycle. 
 the file system as CSV files which can then be imported in Excel in order to draw graph or perform additional
 calculations.
 
+Note :
+I faced some memory problems with CircuitPlayground Express so I had to remove dependencies to 
+adafruit_circuitplayground.express and use standard libs to acces neopixels and buttons.
+Code has also been splitted in 2:
+- batterrytester.py implements the state machine for the test. On systems with limited memory (SAMD21), 
+  it must be precompiled to batterytester.mpy. Same applies to barbudor_ina3221 -> mpy
+- runtest.py is the main script 
+
+Running :
+From REPL, execute
+>>> import batterytester
+>>> import runtest
+>>> runtest.test()
+
 Dependencies
 =============
 This script depends on:

@@ -12,14 +12,7 @@ Based on
 """
 
 # biggest lib to be imported 1st to reduce memory fragmentation
-from barbudor_ina3221_lite import INA3221
-from adafruit_circuitplayground.express import cpx
 import time
-import os
-import storage
-import digitalio
-import board
-
 
 # pylint: disable=bad-whitespace
 # states, sample period, neopixels colors
@@ -48,8 +41,8 @@ _VOLTAGE_END                = 2.9
 _SAMPLE_PERIOD_ENDING       = 0.5
 _ENDING_DURATION            = 120
 _PIX_ENDING                 = ( 80,  80,  0)
-# END of all measurements if done _CYCLE_COUNT complete cycles
-_CYCLE_COUNT                = 4
+# END of all measurements if done _CYCLE_MAX complete cycles
+_CYCLE_MAX                 = 4
 _STATE_ENDED                = 9
 _PIX_ENDED                  = (255,   0,  0)
 
@@ -64,8 +57,8 @@ _SHUNT_VALUE                = 0.1
 
 # file names and log format
 _FILE_COUNTER               = "/testcount.txt"
-_FILE_LOG                   = "/battery%03d.csv"
-_LOG_HEADER                 = "File: %s\nTime;Voltage (V);Current (A);C (Ah)\n"
+_FILE_LOG                   = "/bat_%s.csv"
+_LOG_HEADER                 = "Battery:;%s\nTime;Voltage (V);Current (A);C (Ah)\n"
 #_LOG_FORMAT                 = "%7.1f;%6.3f;%6.3f;%6.3f\n"
 _LOG_FORMAT                 = "%f;%f;%f;%f\n"
 # pylint: enable=bad-whitespace
@@ -75,70 +68,29 @@ class Tester:
     """battery tester state-machine"""
 
     def _setpix(self, color):
-        cpx.pixels[self.pixel] = color
+        self.pixels[self.pixelnum] = color
 
     def _getpix(self):
-        return cpx.pixels[self.pixel]
-
-    def _read_file_counter(self):
-        counter = 0
-        try:
-            with open(_FILE_COUNTER, "r") as file:
-                line = file.readline()
-                line = line.strip()
-                counter = int(line)
-                #print("%9.2f:[%d]: read counter %d" % (time.monotonic(), self.channel, counter))
-        except Exception as ex:
-            #print("Exception ", ex.args)
-            #print("%9.2f:[%d]: read counter default %d" % \
-            #    (time.monotonic(), self.channel, counter))
-            pass
-        return counter
-
-    def _write_file_counter(self, counter):
-        #print("%9.2f:[%d]: write counter %d" % (time.monotonic(), self.channel, counter))
-        try:
-            with open(_FILE_COUNTER, "w") as file:
-                file.write("%d\n" % counter)
-        except:
-            pass
-
-    #def _read_v_and_i_sim(self):
-    #    voltage = 4.200
-    #    current = 0.000
-    #    if self.relay.value == _RELAY_ON:
-    #        if self.previous_voltage < 3.4:
-    #            voltage = 4.000-(self.sample_count/(10.0+self.channel))
-    #            current = 1.123-(self.sample_count/(40.0+self.channel))
-    #        else:
-    #            voltage = 4.000-(self.sample_count/(20.0+self.channel))
-    #            current = 1.123-(self.sample_count/(40.0+self.channel))
-    #    self.sample_count += 1
-    #    print("%9.2f:[%d]: %5.3fV %5.3fA" % (time.monotonic(), self.channel, voltage, current))
-    #    return (voltage, current)
+        return self.pixels[self.pixelnum]
 
     def _read_v_and_i(self):
         return (self.sensor.bus_voltage(self.channel), self.sensor.current(self.channel))
-
-    def _create_log(self):
-        filecount = self._read_file_counter()
-        self.logfilename = _FILE_LOG % filecount
-        with open(self.logfilename, "w") as file:
-            file.write(_LOG_HEADER % self.logfilename)
-        self._write_file_counter(filecount+1)
 
     def _write_log(self, timestamp, voltage, current, capacity):
         with open(self.logfilename, "a") as file:
             file.write(_LOG_FORMAT % (timestamp, voltage, current, capacity))
 
-    def __init__(self, sensor, channel, pin, neopixel):
-        self.relay = digitalio.DigitalInOut(pin)
-        self.relay.switch_to_output(value=_RELAY_OFF)
+    def __init__(self, name, sensor, channel, relay, pixels, pixelnum):
+        self.relay = relay
         self.sensor = sensor
         self.channel = channel
-        self.pixel = neopixel
+        self.pixels = pixels
+        self.pixelnum = pixelnum
         self.state = _STATE_WAITING
         self._setpix(_PIX_WAITING)
+        self.logfilename = _FILE_LOG % name.replace(" ", "_")
+        with open(self.logfilename, "w") as file:
+            file.write(_LOG_HEADER % name)
 
     def __del__(self):
         self.deinit()
@@ -150,15 +102,13 @@ class Tester:
 
     def start(self):
         # initialise state machine
-        self.sample_count = 0
         self.sample_period = 0
-        self.cycle_count = _CYCLE_COUNT
+        self.cycle_count = 0
         self.state = _STATE_STARTING
         self.sum_c = 0.0
         # start V & I measurement
         self.sensor.enable_channel(self.channel)
         # create log file
-        self._create_log()
         print("%9.2f:[%d]: writing to '%s'" % (0.0, self.channel, self.logfilename))
 
     def run(self):
@@ -213,9 +163,10 @@ class Tester:
                 if self.state < _STATE_ENDING:
                     self.sum_c += delta_c
                     if voltage <= _VOLTAGE_END:
-                        print("%9.2f:[%d]: ->ending cycle %d" % \
-                            (now-self.start_time, self.channel, _CYCLE_COUNT-self.cycle_count+1))
                         self.relay.value = _RELAY_OFF
+                        self.cycle_count += 1
+                        print("%9.2f:[%d]: ->ending cycle %d" % \
+                            (now-self.start_time, self.channel, self.cycle_count))
                         self.state = _STATE_ENDING
                         self.ending = _ENDING_DURATION
                         pixel = _PIX_ENDING
@@ -225,15 +176,14 @@ class Tester:
                 if self.state == _STATE_ENDING:
                     self.ending -= 1
                     if self.ending == 0:
-                        self.cycle_count -= 1
-                        if self.cycle_count <= 0:
+                        if self.cycle_count >= _CYCLE_MAX:
                             print("%9.2f:[%d]: ended" % (now-self.start_time, self.channel))
                             self.state = _STATE_ENDED
                             pixel = _PIX_ENDED
                             self.sensor.enable_channel(self.channel, False)
                         else:
-                            print("%9.2f:[%d]: cycle %d" % \
-                                   (now-self.start_time, self.channel, _CYCLE_COUNT-self.cycle_count))
+                            print("%9.2f:[%d]: run cycle %d" % \
+                                   (now-self.start_time, self.channel, self.cycle_count+1))
                             self.relay.value = _RELAY_ON
                             self.state = _STATE_RUNNING_FAST
                             pixel = _PIX_RUNNING_FAST
@@ -251,54 +201,4 @@ class Tester:
         # endif self.state < _STATE_ENDED:
     #enddef run()
 
-
 ################################################################################
-
-# check if FS is writable
-try:
-    with open("/test.test", "w") as f:
-        f.write("tested\n")
-    os.remove("/test.test")
-except:
-    try:
-        storage.remount("/", False)
-    except:
-        cpx.pixels[0] = (255, 0, 0,)
-        while True:
-            pass
-
-
-cpx.pixels.brightness = 0.1
-
-# create measure chip
-i2c_bus = board.I2C()
-ina = INA3221(i2c_bus)
-
-# create testers
-#testers = (Tester(ina, 1, board.A1, 6), Tester(ina, 2, board.A2, 7), Tester(ina, 3, board.A3, 8))
-testers = [Tester(ina, 1, board.A1, 6)]
-
-def RunTest():
-
-    # wait press A to start
-    while not cpx.button_a:
-        cpx.red_led = not cpx.red_led
-        time.sleep(0.200)
-        cpx.red_led = False
-
-    # start state-machines
-    for t in testers:
-        t.start()
-
-    # test loop, press B to exit
-    while not cpx.button_b:
-        for t in testers:
-            t.run()
-
-    # clean-up
-    for t in testers:
-        t.deinit()
-
-################################################################################
-
-#RunTest()
