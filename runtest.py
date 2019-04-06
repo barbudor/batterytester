@@ -23,7 +23,7 @@ from neopixel import NeoPixel
 import digitalio
 
 # neopixels
-pixels = NeoPixel(board.NEOPIXEL,10)
+pixels = NeoPixel(board.NEOPIXEL, 10)
 pixels.brightness = 0.1
 
 # check if FS is writable
@@ -60,7 +60,8 @@ def test(number_of_batteries=1):
         print(battery_name)
         relay = digitalio.DigitalInOut(_RELAYPIN_CHAN[slot])
         relay.switch_to_output(value=True)
-        testers.append(batterytester.Tester(battery_name, ina, slot+1, relay, pixels, _NEOPIX_CHAN[slot]))
+        testers.append(batterytester.Tester(battery_name, ina, slot+1, relay, \
+            pixels, _NEOPIX_CHAN[slot]))
 
     # wait press A to start
     print("Press button 'A' to start the test")

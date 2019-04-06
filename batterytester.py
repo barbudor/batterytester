@@ -35,7 +35,7 @@ _STATE_RUNNING_FAST2        = 5
 _VOLTAGE_FAST2              = 3.25
 _SAMPLE_PERIOD_FAST2        = 0.5
 _PIX_RUNNING_FAST2          = ( 25,  80,  0)
-# ENDING - As voltage drops below _VOLTAGE_END, relay is off and we keep measuring for _ENDING_DURATION_SAMPLES
+# ENDING - As voltage drops below _VOLTAGE_END, switch relay off and keep measuring for _ENDING_DURATION_SAMPLES
 _STATE_ENDING               = 8
 _VOLTAGE_END                = 2.9
 _SAMPLE_PERIOD_ENDING       = 0.5
@@ -140,7 +140,6 @@ class Tester:
                 (voltage, current) = self._read_v_and_i()
                 print("%9.2f:[%d]: sample %5.3fV, %5.3fA" % \
                     (now-self.start_time, self.channel, voltage, current))
-                delta_i = self.previous_current - current
                 delta_c = delta_t * (self.previous_current + current) / (2.0 * 3600.0)
                 self.last_time += self.sample_period
 
